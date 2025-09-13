@@ -1,0 +1,21 @@
+{
+  "timestamp": "2025-09-13T22:01:49.952910",
+  "best_parameters": {
+    "logistic_regression": {
+      "solver": "saga",
+      "penalty": "l1",
+      "C": 1
+    },
+    "random_forest": {
+      "n_estimators": 200,
+      "min_samples_split": 5,
+      "min_samples_leaf": 4,
+      "max_depth": 20
+    },
+    "svm": {
+      "kernel": "rbf",
+      "gamma": "scale",
+      "C": 1
+    }
+  }
+}

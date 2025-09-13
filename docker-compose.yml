@@ -1,0 +1,104 @@
+services:
+  # Main data science application
+  data-science-app:
+    build: .
+    container_name: iris-mvp
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./notebooks:/app/notebooks
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - PYTHONPATH=/app
+    command: python main.py
+
+  # Jupyter Lab service
+  jupyter:
+    build: .
+    container_name: iris-jupyter
+    volumes:
+      - ./:/app
+    ports:
+      - "8888:8888"
+    environment:
+      - PYTHONPATH=/app
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=''
+
+  # FastAPI service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: iris-api
+    volumes:
+      - ./models:/app/models
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+    depends_on:
+      - data-science-app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Model training service (for batch training)
+  training:
+    build: .
+    container_name: iris-training
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./src:/app/src
+    environment:
+      - PYTHONPATH=/app
+    command: >
+      python -c "
+      import sys; sys.path.append('/app');
+      from src.data_processing import DataProcessor;
+      from src.model import ModelTrainer;
+      from src.feature_engineering import FeatureEngineer;
+      print('🚀 Starting enhanced training pipeline...');
+      processor = DataProcessor();
+      trainer = ModelTrainer();
+      engineer = FeatureEngineer();
+      X, y, y_labels, target_names = processor.load_iris_data();
+      X_train, X_test, y_train, y_test = processor.split_and_scale_data(X, y);
+      X_train_eng = engineer.engineer_features(X_train, y_train, include_interactions=True, feature_selection_method='univariate', k_features=6);
+      X_test_eng = engineer.feature_selector.transform(X_test) if engineer.feature_selector else X_test;
+      best_params = trainer.hyperparameter_tuning(X_train_eng, y_train, method='random', n_iter=10);
+      trainer.save_hyperparameters();
+      trainer.train_models(X_train_eng, y_train);
+      trainer.evaluate_models(X_test_eng, y_test, target_names);
+      best_model = max(trainer.results.items(), key=lambda x: x[1]['accuracy']);
+      trainer.save_best_model(best_model[0], f'models/best_model_{best_model[0]}.joblib');
+      engineer.save_pipeline();
+      print(f'✅ Enhanced training completed! Best model: {best_model[0]} with accuracy: {best_model[1][\"accuracy\"]:.4f}');
+      "
+    profiles:
+      - training
+
+  # Testing service
+  test:
+    build: .
+    container_name: iris-test
+    volumes:
+      - ./:/app
+    environment:
+      - PYTHONPATH=/app
+    command: pytest tests/ -v --cov=src --cov-report=html --cov-report=term-missing
+    profiles:
+      - test
+
+networks:
+  default:
+    name: data-science-network
+
+volumes:
+  models:
+    driver: local
+  data:
+    driver: local

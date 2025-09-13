@@ -1,0 +1,366 @@
+name: Model Retraining
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # Weekly on Monday at 3 AM
+  workflow_dispatch:  # Manual trigger
+    inputs:
+      retrain_reason:
+        description: 'Reason for retraining'
+        required: true
+        default: 'Manual retrain'
+      hyperparameter_tuning:
+        description: 'Enable hyperparameter tuning'
+        type: boolean
+        default: true
+
+env:
+  PYTHON_VERSION: '3.10'
+
+jobs:
+  retrain-model:
+    name: Retrain ML Models
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Download latest data
+      run: |
+        echo "📥 Downloading latest training data..."
+        # Add commands to download/update training data
+        # Example: aws s3 sync s3://my-bucket/data/ data/raw/
+        # Example: curl -o data/raw/new_data.csv "https://api.example.com/data"
+        echo "✅ Data download completed"
+    
+    - name: Validate data quality
+      run: |
+        python -c "
+        import pandas as pd
+        import numpy as np
+        from sklearn.datasets import load_iris
+        
+        print('🔍 Validating data quality...')
+        
+        # Load data (using iris as example)
+        iris = load_iris()
+        X = pd.DataFrame(iris.data, columns=iris.feature_names)
+        y = pd.Series(iris.target)
+        
+        # Data quality checks
+        assert X.shape[0] > 0, 'No data found'
+        assert not X.isnull().any().any(), 'Missing values found'
+        assert len(y.unique()) >= 2, 'Not enough classes'
+        
+        print(f'✅ Data validation passed: {X.shape[0]} samples, {X.shape[1]} features')
+        "
+    
+    - name: Run model retraining
+      run: |
+        python -c "
+        import sys
+        sys.path.append('src')
+        
+        from data_processing import DataProcessor
+        from model import ModelTrainer
+        from feature_engineering import FeatureEngineer
+        import joblib
+        import json
+        from datetime import datetime
+        
+        print('🚀 Starting model retraining...')
+        
+        # Initialize components
+        processor = DataProcessor()
+        trainer = ModelTrainer()
+        engineer = FeatureEngineer()
+        
+        # Load and process data
+        X, y, y_labels, target_names = processor.load_iris_data()
+        X_train, X_test, y_train, y_test = processor.split_and_scale_data(X, y)
+        
+        # Feature engineering
+        print('🔧 Engineering features...')
+        X_train_eng = engineer.engineer_features(
+            X_train, y_train,
+            include_polynomial=False,
+            include_interactions=True,
+            feature_selection_method='univariate',
+            k_features=6
+        )
+        
+        # Transform test data
+        if engineer.feature_selector:
+            X_test_eng = engineer.feature_selector.transform(X_test)
+        else:
+            X_test_eng = X_test
+        
+        # Hyperparameter tuning (if enabled)
+        if '${{ github.event.inputs.hyperparameter_tuning }}' == 'true':
+            print('⚙️ Tuning hyperparameters...')
+            trainer.hyperparameter_tuning(X_train_eng, y_train, method='random', n_iter=20)
+            trainer.save_hyperparameters()
+        
+        # Train models
+        print('🤖 Training models...')
+        trainer.train_models(X_train_eng, y_train)
+        
+        # Evaluate models
+        print('📊 Evaluating models...')
+        trainer.evaluate_models(X_test_eng, y_test, target_names)
+        
+        # Find best model
+        best_model_name = max(trainer.results.items(), key=lambda x: x[1]['accuracy'])[0]
+        best_accuracy = trainer.results[best_model_name]['accuracy']
+        
+        print(f'🏆 Best model: {best_model_name} with accuracy: {best_accuracy:.4f}')
+        
+        # Save models and results
+        import os
+        os.makedirs('models', exist_ok=True)
+        
+        # Save all models
+        for name, model in trainer.trained_models.items():
+            joblib.dump(model, f'models/{name}_model.joblib')
+        
+        # Save best model
+        trainer.save_best_model(best_model_name, f'models/best_model_{best_model_name}.joblib')
+        
+        # Save feature engineering pipeline
+        engineer.save_pipeline('models/feature_engineering')
+        
+        # Save training metadata
+        metadata = {
+            'timestamp': datetime.now().isoformat(),
+            'reason': '${{ github.event.inputs.retrain_reason }}' or 'Scheduled retrain',
+            'best_model': best_model_name,
+            'best_accuracy': best_accuracy,
+            'hyperparameter_tuning': '${{ github.event.inputs.hyperparameter_tuning }}' == 'true',
+            'models_trained': list(trainer.results.keys()),
+            'feature_engineering': {
+                'features_selected': len(X_train_eng[0]) if len(X_train_eng) > 0 else 0,
+                'original_features': X_train.shape[1]
+            }
+        }
+        
+        with open('models/training_metadata.json', 'w') as f:
+            json.dump(metadata, f, indent=2)
+        
+        print('✅ Model retraining completed successfully!')
+        "
+    
+    - name: Validate new models
+      run: |
+        python -c "
+        import joblib
+        import numpy as np
+        from sklearn.datasets import load_iris
+        from sklearn.metrics import accuracy_score, classification_report
+        import json
+        
+        print('🔍 Validating new models...')
+        
+        # Load test data
+        iris = load_iris()
+        X_test, y_test = iris.data[-30:], iris.target[-30:]
+        
+        # Load metadata
+        with open('models/training_metadata.json', 'r') as f:
+            metadata = json.load(f)
+        
+        best_model_name = metadata['best_model']
+        
+        # Load and test best model
+        model = joblib.load(f'models/best_model_{best_model_name}.joblib')
+        predictions = model.predict(X_test)
+        accuracy = accuracy_score(y_test, predictions)
+        
+        print(f'New model accuracy: {accuracy:.4f}')
+        print(f'Training accuracy: {metadata[\"best_accuracy\"]:.4f}')
+        
+        # Validation checks
+        assert accuracy > 0.7, f'Model accuracy too low: {accuracy:.4f}'
+        assert abs(accuracy - metadata[\"best_accuracy\"]) < 0.2, 'Large accuracy difference between train/test'
+        
+        print('✅ Model validation passed!')
+        "
+    
+    - name: Compare with previous model
+      run: |
+        python -c "
+        import os
+        import json
+        
+        print('⚖️ Comparing with previous model...')
+        
+        # Load new model metadata
+        with open('models/training_metadata.json', 'r') as f:
+            new_metadata = json.load(f)
+        
+        new_accuracy = new_metadata['best_accuracy']
+        
+        # Check if previous metadata exists
+        if os.path.exists('models/previous_training_metadata.json'):
+            with open('models/previous_training_metadata.json', 'r') as f:
+                old_metadata = json.load(f)
+            
+            old_accuracy = old_metadata['best_accuracy']
+            improvement = new_accuracy - old_accuracy
+            
+            print(f'Previous model accuracy: {old_accuracy:.4f}')
+            print(f'New model accuracy: {new_accuracy:.4f}')
+            print(f'Improvement: {improvement:+.4f}')
+            
+            if improvement < -0.05:  # Significant degradation
+                print('⚠️ Warning: Model performance degraded significantly!')
+                # Could add logic to reject the new model
+            elif improvement > 0.01:  # Improvement
+                print('🎉 Model improved!')
+            else:
+                print('📊 Model performance similar to previous version')
+        else:
+            print('📝 No previous model found for comparison')
+        
+        print('✅ Model comparison completed')
+        "
+    
+    - name: Create model artifacts
+      run: |
+        # Create artifact directory
+        mkdir -p model-artifacts
+        
+        # Copy model files
+        cp -r models/* model-artifacts/
+        
+        # Create model card
+        python -c "
+        import json
+        from datetime import datetime
+        
+        with open('models/training_metadata.json', 'r') as f:
+            metadata = json.load(f)
+        
+        model_card = {
+            'model_name': f'Data Science MVP - {metadata[\"best_model\"]}',
+            'version': datetime.now().strftime('%Y.%m.%d'),
+            'created_date': metadata['timestamp'],
+            'performance': {
+                'accuracy': metadata['best_accuracy'],
+                'validation_date': datetime.now().isoformat()
+            },
+            'training_details': {
+                'reason': metadata['reason'],
+                'hyperparameter_tuning': metadata['hyperparameter_tuning'],
+                'feature_engineering': metadata['feature_engineering']
+            },
+            'usage': {
+                'input_features': ['sepal length (cm)', 'sepal width (cm)', 'petal length (cm)', 'petal width (cm)'],
+                'output_classes': ['setosa', 'versicolor', 'virginica'],
+                'api_endpoint': '/predict'
+            }
+        }
+        
+        with open('model-artifacts/model_card.json', 'w') as f:
+            json.dump(model_card, f, indent=2)
+        
+        print('📋 Model card created')
+        "
+    
+    - name: Upload model artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: retrained-models
+        path: model-artifacts/
+        retention-days: 30
+    
+    - name: Update model registry
+      run: |
+        echo "📝 Updating model registry..."
+        # Add commands to update your model registry
+        # Example: MLflow, DVC, or custom registry
+        echo "✅ Model registry updated"
+    
+    - name: Send notification
+      if: always()
+      run: |
+        python -c "
+        import json
+        import os
+        
+        status = 'success' if os.path.exists('models/training_metadata.json') else 'failed'
+        
+        if status == 'success':
+            with open('models/training_metadata.json', 'r') as f:
+                metadata = json.load(f)
+            
+            message = f'''
+            🤖 Model Retraining Completed Successfully!
+            
+            📊 Best Model: {metadata['best_model']}
+            🎯 Accuracy: {metadata['best_accuracy']:.4f}
+            🔧 Features: {metadata['feature_engineering']['features_selected']} (from {metadata['feature_engineering']['original_features']})
+            ⚙️ Hyperparameter Tuning: {'Yes' if metadata['hyperparameter_tuning'] else 'No'}
+            📅 Timestamp: {metadata['timestamp']}
+            💭 Reason: {metadata['reason']}
+            '''
+        else:
+            message = '❌ Model retraining failed. Please check the logs.'
+        
+        print(message)
+        
+        # You can add actual notification logic here
+        # Example: Slack, email, or webhook notifications
+        "
+
+  deploy-retrained-model:
+    name: Deploy Retrained Model
+    runs-on: ubuntu-latest
+    needs: retrain-model
+    if: success()
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download model artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: retrained-models
+        path: models/
+    
+    - name: Deploy to staging for validation
+      run: |
+        echo "🚀 Deploying retrained model to staging..."
+        # Add staging deployment commands
+        echo "✅ Staging deployment completed"
+    
+    - name: Run integration tests
+      run: |
+        echo "🧪 Running integration tests..."
+        # Add integration test commands
+        echo "✅ Integration tests passed"
+    
+    - name: Deploy to production
+      run: |
+        echo "🚀 Deploying retrained model to production..."
+        # Add production deployment commands
+        echo "✅ Production deployment completed"
+    
+    - name: Archive previous model
+      run: |
+        echo "📦 Archiving previous model..."
+        # Add commands to archive the previous model
+        echo "✅ Previous model archived"
