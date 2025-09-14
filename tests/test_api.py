@@ -30,7 +30,8 @@ class MockModel:
 @pytest.fixture
 def mock_app():
     """Create test app with mocked models."""
-    from app import app, loaded_models
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'api'))
+    from api.app import app, loaded_models
     
     # Add mock model
     loaded_models["test_model"] = MockModel()
@@ -246,7 +247,7 @@ class TestAPIModels:
     
     def test_prediction_request_validation(self):
         """Test PredictionRequest model validation."""
-        from app import PredictionRequest
+        from api.app import PredictionRequest
         
         # Valid request
         valid_request = PredictionRequest(
@@ -266,7 +267,7 @@ class TestAPIModels:
     
     def test_batch_prediction_request_validation(self):
         """Test BatchPredictionRequest model validation."""
-        from app import BatchPredictionRequest
+        from api.app import BatchPredictionRequest
         
         # Valid request
         valid_request = BatchPredictionRequest(
@@ -277,7 +278,7 @@ class TestAPIModels:
     
     def test_response_models(self):
         """Test response model creation."""
-        from app import PredictionResponse, BatchPredictionResponse, ModelInfo, HealthResponse
+        from api.app import PredictionResponse, BatchPredictionResponse, ModelInfo, HealthResponse
         
         # Test PredictionResponse
         pred_response = PredictionResponse(

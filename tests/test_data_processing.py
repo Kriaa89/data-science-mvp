@@ -1,10 +1,14 @@
 """Tests for data processing module."""
+import sys
+import os
 import pytest
 import numpy as np
 import pandas as pd
 from sklearn.datasets import load_iris
 
-from data_processing import DataProcessor
+# Add src to path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
+from src.data_processing import DataProcessor
 
 class TestDataProcessor:
     """Test cases for DataProcessor class."""

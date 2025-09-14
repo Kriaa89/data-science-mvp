@@ -1,12 +1,15 @@
 """Tests for feature engineering module."""
+import sys
+import os
 import pytest
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 import tempfile
-import os
 
-from feature_engineering import FeatureEngineer
+# Add src to path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
+from src.feature_engineering import FeatureEngineer
 
 class TestFeatureEngineer:
     """Test cases for FeatureEngineer class."""

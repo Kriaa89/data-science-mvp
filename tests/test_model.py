@@ -1,4 +1,5 @@
 """Tests for model training module."""
+import sys
 import pytest
 import numpy as np
 import pandas as pd
@@ -8,7 +9,9 @@ from sklearn.svm import SVC
 import tempfile
 import os
 
-from model import ModelTrainer
+# Add src to path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
+from src.model import ModelTrainer
 
 class TestModelTrainer:
     """Test cases for ModelTrainer class."""
