@@ -65,9 +65,3 @@ tqdm==4.66.1
 
 # Development dependencies
 pre-commit==3.3.3
-
-# Environment management
-python-dotenv==1.0.0
-
-# Progress bars
-tqdm==4.66.1
